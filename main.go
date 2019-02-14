@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+  "sync"
 
 	uuid "github.com/satori/go.uuid"
 )
@@ -38,16 +39,16 @@ type Message struct {
 }
 
 // Queues - queues map.
-var Queues map[string]*Queue
+var Queues sync.Map
 
 // Messages - messages map.
-var Messages map[string]*Message
+var Messages sync.Map
 
 // ReceiptHandles - receipt handles map.
-var ReceiptHandles map[string]*Message
+var ReceiptHandles sync.Map
 
 func _createQueue(QueueName string) {
-	Queues[QueueName] = &Queue{
+	Queues.Store(QueueName, &Queue{
 		// TODO: Create good ARN
 		QueueArn:                              QueueName,
 		ApproximateNumberOfMessages:           0,
@@ -60,15 +61,19 @@ func _createQueue(QueueName string) {
 		MessageRetentionPeriod:                346500,
 		DelaySeconds:                          0,
 		ReceiveMessageWaitTimeSeconds:         30,
-	}
+	})
 }
 
 func listQueues(w http.ResponseWriter, r *http.Request) {
 	var RequestID = uuid.Must(uuid.NewV4()).String()
 	var ListQueuesResult = ""
-	for QueueURL := range Queues {
-		ListQueuesResult += fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
-	}
+  Queues.Range(func(QueueURL, v interface{}) bool {
+    ListQueuesResult += fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
+    return true
+  })
+	// for QueueURL := range Queues {
+	// 	ListQueuesResult += fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
+	// }
 	fmt.Fprintf(w, `
 <ListQueuesResponse>
     <ListQueuesResult>
@@ -83,11 +88,12 @@ func listQueues(w http.ResponseWriter, r *http.Request) {
 
 func getQueueAttributes(w http.ResponseWriter, r *http.Request) {
 	var QueueURL = r.Form.Get("QueueUrl")
-	var Queue, ok = Queues[QueueURL]
+	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
 		writeError(w, r, "AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 		return
 	}
+  var Queue = QueuePtr.(Queue)
 
 	var RequestID = uuid.Must(uuid.NewV4()).String()
 	fmt.Fprintf(w, `<GetQueueAttributesResponse>
@@ -142,7 +148,8 @@ func getQueueAttributes(w http.ResponseWriter, r *http.Request) {
   </ResponseMetadata>
 </GetQueueAttributesResponse>`,
 		Queue.QueueArn,
-		len(Messages),
+    0,
+		// len(Messages),
 		Queue.ApproximateNumberOfMessagesNotVisible,
 		Queue.ApproximateNumberOfMessagesDelayed,
 		Queue.CreatedTimestamp,
@@ -157,7 +164,7 @@ func getQueueAttributes(w http.ResponseWriter, r *http.Request) {
 func sendMessage(w http.ResponseWriter, r *http.Request) {
 	// append(Messages, "test")
 	var QueueURL = r.Form.Get("QueueUrl")
-	var _, ok = Queues[QueueURL]
+	var _, ok = Queues.Load("QueueURL")
 	if !ok {
 		_createQueue(QueueURL)
 	}
@@ -173,7 +180,8 @@ func sendMessage(w http.ResponseWriter, r *http.Request) {
 		SentTimestamp:                    time.Now().Unix(),
 		VisibilityDeadline:               0,
 	}
-	Messages[Message.MessageID] = &Message
+	// Messages[Message.MessageID] = &Message
+  Messages.Store(Message.MessageID, &Message)
 	fmt.Fprintf(w, `<SendMessageResponse>
     <SendMessageResult>
         <MD5OfMessageBody>`+MD5OfMessageBody+`</MD5OfMessageBody>
@@ -198,13 +206,16 @@ func receiveMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	var FoundMessage *Message
-	for _, Message := range Messages {
-		if Message.VisibilityDeadline < Now {
-			FoundMessage = Message
-			break
-		}
-	}
+  Queues.Range(func(MessageID, MessagePtr interface{}) bool {
+    var Message = MessagePtr.(*Message)
+    if Message.VisibilityDeadline < Now {
+      FoundMessage = Message
+      return false
+    }
+    return true
+  })
 
 	var ReceiveMessageResult = ""
 
@@ -215,10 +226,10 @@ func receiveMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		FoundMessage.ApproximateReceiveCount++
 		if FoundMessage.ReceiptHandle != "" {
-			delete(ReceiptHandles, FoundMessage.ReceiptHandle)
+			ReceiptHandles.Delete(FoundMessage.ReceiptHandle)
 		}
 		FoundMessage.ReceiptHandle = uuid.Must(uuid.NewV4()).String()
-		ReceiptHandles[FoundMessage.ReceiptHandle] = FoundMessage
+		ReceiptHandles.Store(FoundMessage.ReceiptHandle, FoundMessage)
 
 		ReceiveMessageResult = fmt.Sprintf(`
     <Message>
@@ -257,9 +268,12 @@ func receiveMessage(w http.ResponseWriter, r *http.Request) {
 
 func deleteMessage(w http.ResponseWriter, r *http.Request) {
 	var ReceiptHandle = r.Form.Get("ReceiptHandle")
-	if Message, ok := ReceiptHandles[ReceiptHandle]; ok {
-		delete(ReceiptHandles, ReceiptHandle)
-		delete(Messages, Message.MessageID)
+	if MessagePtr, ok := ReceiptHandles.Load(ReceiptHandle); ok {
+    var Message = MessagePtr.(Message)
+		// delete(ReceiptHandles, ReceiptHandle)
+    ReceiptHandles.Delete(ReceiptHandle)
+		// delete(Messages, Message.MessageID)
+    Messages.Delete(Message.MessageID)
 	} else {
 		writeError(w, r, "ReceiptHandleIsInvalid", fmt.Sprintf("The input receipt handle \"%s\" is not a valid receipt handle.", ReceiptHandle))
 		return
@@ -311,9 +325,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	Queues = make(map[string]*Queue)
-	Messages = make(map[string]*Message)
-	ReceiptHandles = make(map[string]*Message)
+	// Queues = make(map[string]*Queue)
+	// Messages = make(map[string]*Message)
+	// ReceiptHandles = make(map[string]*Message)
 	http.HandleFunc("/", handler)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
