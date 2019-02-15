@@ -3,7 +3,7 @@ import os
 import requests
 import time
 
-NUM_PROCESSES=4
+NUM_PROCESSES=1
 
 def work():
   start = time.time()
