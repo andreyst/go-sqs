@@ -71,9 +71,6 @@ func listQueues(w http.ResponseWriter, r *http.Request) {
     ListQueuesResult += fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
     return true
   })
-	// for QueueURL := range Queues {
-	// 	ListQueuesResult += fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
-	// }
 	fmt.Fprintf(w, `
 <ListQueuesResponse>
     <ListQueuesResult>
@@ -149,7 +146,6 @@ func getQueueAttributes(w http.ResponseWriter, r *http.Request) {
 </GetQueueAttributesResponse>`,
 		Queue.QueueArn,
     0,
-		// len(Messages),
 		Queue.ApproximateNumberOfMessagesNotVisible,
 		Queue.ApproximateNumberOfMessagesDelayed,
 		Queue.CreatedTimestamp,
@@ -162,7 +158,6 @@ func getQueueAttributes(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendMessage(w http.ResponseWriter, r *http.Request) {
-	// append(Messages, "test")
 	var QueueURL = r.Form.Get("QueueUrl")
 	var _, ok = Queues.Load("QueueURL")
 	if !ok {
@@ -270,9 +265,7 @@ func deleteMessage(w http.ResponseWriter, r *http.Request) {
 	var ReceiptHandle = r.Form.Get("ReceiptHandle")
 	if MessagePtr, ok := ReceiptHandles.Load(ReceiptHandle); ok {
     var Message = MessagePtr.(Message)
-		// delete(ReceiptHandles, ReceiptHandle)
     ReceiptHandles.Delete(ReceiptHandle)
-		// delete(Messages, Message.MessageID)
     Messages.Delete(Message.MessageID)
 	} else {
 		writeError(w, r, "ReceiptHandleIsInvalid", fmt.Sprintf("The input receipt handle \"%s\" is not a valid receipt handle.", ReceiptHandle))
@@ -325,9 +318,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Queues = make(map[string]*Queue)
-	// Messages = make(map[string]*Message)
-	// ReceiptHandles = make(map[string]*Message)
-	http.HandleFunc("/", handler)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+  var Port = "8080"
+  if len(os.Args) > 0 {
+    Port = os.Args[1]
+  }
+  http.HandleFunc("/", handler)
+  log.Fatal(http.ListenAndServe(":" + Port, nil))
 }
