@@ -25,8 +25,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		Response, StatusCode = handlers.CreateQueue(r.Form, &queues)
 	case "DeleteMessage":
 		Response, StatusCode = handlers.DeleteMessage(r.Form, &queues)
-	// case "DeleteMessageBatch":
-	// 	deleteMessage(r.Form, &queues)
 	case "DeleteQueue":
 		Response, StatusCode = handlers.DeleteQueue(r.Form, &queues)
 	case "GetQueueAttributes":
