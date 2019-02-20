@@ -46,6 +46,7 @@ type Message struct {
 var Queues sync.Map
 
 func _createQueue(QueueName string) *Queue {
+	// TODO: Create real URL for queue
 	Queues.Store(QueueName, &Queue{
 		// TODO: Create good ARN
 		QueueArn:                              QueueName,
