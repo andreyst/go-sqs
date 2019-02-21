@@ -9,11 +9,15 @@ import time
 port = os.environ.get("PORT", "8080")
 
 session = boto3.session.Session()
+config = botocore.client.Config(
+    connect_timeout=3, read_timeout=3, retries={"max_attempts": 0}
+)
 sqs_client = session.client(
     service_name="sqs",
     aws_access_key_id="unused",
     aws_secret_access_key="unused",
     endpoint_url="http://localhost:" + port,
+    config=config,
 )
 
 
