@@ -22,6 +22,7 @@ type Queue struct {
 	DelaySeconds                          int
 	ReceiveMessageWaitTimeSeconds         int
 	Messages                              sync.Map
+	Messages2                             map[string]*Message
 	ReceiptHandles                        sync.Map
 }
 
@@ -85,6 +86,7 @@ func CreateQueue(Queues *sync.Map, QueueName string) *Queue {
 		MessageRetentionPeriod:                346500,
 		DelaySeconds:                          0,
 		ReceiveMessageWaitTimeSeconds:         30,
+		Messages2:                             make(map[string]*Message),
 	})
 
 	var QueuePtr, _ = Queues.Load(QueueName)

@@ -13,6 +13,7 @@ import (
 
 // Queues TODO: add comment
 var queues sync.Map
+var sendChan chan *util.Message
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
@@ -36,9 +37,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	case "ListQueues":
 		Response, StatusCode = handlers.ListQueues(r.Form, &queues)
 	case "SendMessage":
-		Response, StatusCode = handlers.SendMessage(r.Form, &queues)
+		Response, StatusCode = handlers.SendMessage(r.Form, &queues, sendChan)
 	case "SendMessageBatch":
-		Response, StatusCode = handlers.SendMessageBatch(r.Form, &queues)
+		Response, StatusCode = handlers.SendMessageBatch(r.Form, &queues, sendChan)
 	case "ReceiveMessage":
 		Response, StatusCode = handlers.ReceiveMessage(r.Form, &queues)
 	default:
@@ -49,11 +50,24 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, Response)
 }
 
+func messageSender(SendChan <-chan *util.Message) {
+	var Queue = util.CreateQueue(&queues, "somename")
+	var MessagePtr *util.Message
+	for {
+		MessagePtr = <-SendChan
+		Queue.Messages2[MessagePtr.MessageID] = MessagePtr
+	}
+}
+
 func main() {
 	var Port = "8080"
 	if len(os.Args) > 1 {
 		Port = os.Args[1]
 	}
+
+	sendChan = make(chan *util.Message)
+
+	go messageSender(sendChan)
 
 	http.HandleFunc("/", handler)
 	log.Fatal(http.ListenAndServe(":"+Port, nil))
