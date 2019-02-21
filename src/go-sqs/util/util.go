@@ -16,11 +16,11 @@ type Queue struct {
 	ApproximateNumberOfMessagesDelayed    int64
 	CreatedTimestamp                      int64
 	LastModifiedTimestamp                 int64
-	VisibilityTimeout                     int64
-	MaximumMessageSize                    int64
-	MessageRetentionPeriod                int64
-	DelaySeconds                          int64
-	ReceiveMessageWaitTimeSeconds         int64
+	VisibilityTimeout                     int
+	MaximumMessageSize                    int
+	MessageRetentionPeriod                int
+	DelaySeconds                          int
+	ReceiveMessageWaitTimeSeconds         int
 	Messages                              sync.Map
 	ReceiptHandles                        sync.Map
 }
@@ -29,10 +29,12 @@ type Queue struct {
 type Message struct {
 	MessageID                        string
 	Body                             string
+	MD5OfMessageBody                 string
+	MD5OfMessageAttributes           string
 	SenderID                         string
 	ReceiptHandle                    string
 	ApproximateFirstReceiveTimestamp int64
-	ApproximateReceiveCount          int64
+	ApproximateReceiveCount          int
 	SentTimestamp                    int64
 	VisibilityDeadline               int64
 }
