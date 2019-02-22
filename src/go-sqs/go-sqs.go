@@ -37,9 +37,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	case "ListQueues":
 		Response, StatusCode = handlers.ListQueues(r.Form, &queues)
 	case "SendMessage":
-		Response, StatusCode = handlers.SendMessage(r.Form, &queues, sendChan)
+		Response, StatusCode = handlers.SendMessage(r.Form, &queues)
 	case "SendMessageBatch":
-		Response, StatusCode = handlers.SendMessageBatch(r.Form, &queues, sendChan)
+		Response, StatusCode = handlers.SendMessageBatch(r.Form, &queues)
 	case "ReceiveMessage":
 		Response, StatusCode = handlers.ReceiveMessage(r.Form, &queues)
 	default:

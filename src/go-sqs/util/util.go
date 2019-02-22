@@ -23,6 +23,7 @@ type Queue struct {
 	ReceiveMessageWaitTimeSeconds         int
 	Messages                              sync.Map
 	Messages2                             map[string]*Message
+	SendChannel                           chan *Message
 	ReceiptHandles                        sync.Map
 }
 
@@ -87,8 +88,18 @@ func CreateQueue(Queues *sync.Map, QueueName string) *Queue {
 		DelaySeconds:                          0,
 		ReceiveMessageWaitTimeSeconds:         30,
 		Messages2:                             make(map[string]*Message),
+		SendChannel:                           make(chan *Message),
 	})
 
 	var QueuePtr, _ = Queues.Load(QueueName)
+	go queueActor(QueuePtr.(*Queue))
 	return QueuePtr.(*Queue)
+}
+
+func queueActor(Queue *Queue) {
+	var Message *Message
+	for {
+		Message = <-Queue.SendChannel
+		Queue.Messages2[Message.MessageID] = Message
+	}
 }

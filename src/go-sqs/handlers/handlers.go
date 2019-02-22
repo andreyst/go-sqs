@@ -91,7 +91,8 @@ func deleteMessage(Queue *util.Queue, ReceiptHandle string) bool {
 	if MessagePtr, ok := Queue.ReceiptHandles.Load(ReceiptHandle); ok {
 		var Message = MessagePtr.(*util.Message)
 		Queue.ReceiptHandles.Delete(ReceiptHandle)
-		Queue.Messages.Delete(Message.MessageID)
+		// Queue.Messages.Delete(Message.MessageID)
+		delete(Queue.Messages2, Message.MessageID)
 		return true
 	}
 
@@ -175,11 +176,12 @@ func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
 	}
 	var Queue = QueuePtr.(*util.Queue)
 
-	var NumberOfMessages = 0
-	Queue.Messages.Range(func(k, v interface{}) bool {
-		NumberOfMessages++
-		return true
-	})
+	// var NumberOfMessages = 0
+	// Queue.Messages.Range(func(k, v interface{}) bool {
+	// NumberOfMessages++
+	// return true
+	// })
+	var NumberOfMessages = len(Queue.Messages2)
 
 	var Result = fmt.Sprintf(`<Attribute>
 	<Name>QueueArn</Name>
@@ -294,18 +296,28 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 
 	var FoundMessages [10]*util.Message
 	var NumFoundMessages = 0
-	Queue.Messages.Range(func(MessageID, MessagePtr interface{}) bool {
-		var Message = MessagePtr.(*util.Message)
+	for _, Message := range Queue.Messages2 {
 		if Message.VisibilityDeadline < Now {
 			FoundMessages[NumFoundMessages] = Message
 			NumFoundMessages++
 
 			if NumFoundMessages == MaxNumberOfMessages {
-				return false
+				break
 			}
 		}
-		return true
-	})
+	}
+	// Queue.Messages.Range(func(MessageID, MessagePtr interface{}) bool {
+	// 	var Message = MessagePtr.(*util.Message)
+	// 	if Message.VisibilityDeadline < Now {
+	// 		FoundMessages[NumFoundMessages] = Message
+	// 		NumFoundMessages++
+
+	// 		if NumFoundMessages == MaxNumberOfMessages {
+	// 			return false
+	// 		}
+	// 	}
+	// 	return true
+	// })
 
 	var Result = ""
 
@@ -351,7 +363,7 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 	return util.Success("ReceiveMessage", Result)
 }
 
-func sendMessage(Queue *util.Queue, SendChan chan<- *util.Message, MessageBody string, DelaySeconds int) (*util.Message, bool, string, string) {
+func sendMessage(Queue *util.Queue, MessageBody string, DelaySeconds int) (*util.Message, bool, string, string) {
 	// TODO: Move validation of delay seconds to this method
 	// TODO: Calculate MD5 of message body
 	var MD5OfMessageBody = ""
@@ -379,12 +391,12 @@ func sendMessage(Queue *util.Queue, SendChan chan<- *util.Message, MessageBody s
 		VisibilityDeadline:               VisibilityDeadline,
 	}
 
-	SendChan <- &Message
+	Queue.SendChannel <- &Message
 	return &Message, true, "", ""
 }
 
 // SendMessage TODO: add comment
-func SendMessage(Parameters url.Values, Queues *sync.Map, SendChan chan<- *util.Message) (string, int) {
+func SendMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 	var QueueURL = Parameters.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
@@ -404,7 +416,7 @@ func SendMessage(Parameters url.Values, Queues *sync.Map, SendChan chan<- *util.
 
 	var Message *util.Message
 	var ErrorCode, ErrorMessage string
-	Message, ok, ErrorCode, ErrorMessage = sendMessage(Queue, SendChan, Parameters.Get("MessageBody"), DelaySeconds)
+	Message, ok, ErrorCode, ErrorMessage = sendMessage(Queue, Parameters.Get("MessageBody"), DelaySeconds)
 
 	if !ok {
 		return util.Error(ErrorCode, ErrorMessage)
@@ -417,7 +429,7 @@ func SendMessage(Parameters url.Values, Queues *sync.Map, SendChan chan<- *util.
 }
 
 // SendMessageBatch TODO: add comment
-func SendMessageBatch(Parameters url.Values, Queues *sync.Map, SendChan chan<- *util.Message) (string, int) {
+func SendMessageBatch(Parameters url.Values, Queues *sync.Map) (string, int) {
 	var QueueURL = Parameters.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
@@ -450,7 +462,7 @@ func SendMessageBatch(Parameters url.Values, Queues *sync.Map, SendChan chan<- *
 			}
 		}
 
-		var Message, ok, ErrorCode, ErrorMessage = sendMessage(Queue, SendChan, MessageBody, DelaySeconds)
+		var Message, ok, ErrorCode, ErrorMessage = sendMessage(Queue, MessageBody, DelaySeconds)
 		if ok {
 			SuccessfulResult += fmt.Sprintf("<SendMessageBatchResultEntry><Id>%s</Id><MD5OfMessageAttributes>%s</MD5OfMessageAttributes><MD5OfMessageBody>%s</MD5OfMessageBody><MessageId>%s</MessageId></SendMessageBatchResultEntry>", BatchEntryID, Message.MD5OfMessageBody, Message.MD5OfMessageAttributes, Message.MessageID)
 		} else {
