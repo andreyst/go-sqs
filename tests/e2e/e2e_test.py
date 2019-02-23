@@ -6,8 +6,10 @@ import pytest
 import os
 import time
 import math
+import subprocess
+import tempfile
 
-port = os.environ.get("PORT", "8080")
+PORT = os.environ.get("PORT", "23782")
 
 session = boto3.session.Session()
 config = botocore.client.Config(
@@ -17,9 +19,49 @@ sqs_client = session.client(
     service_name="sqs",
     aws_access_key_id="unused",
     aws_secret_access_key="unused",
-    endpoint_url="http://localhost:" + port,
+    endpoint_url="http://localhost:" + PORT,
     config=config,
 )
+
+
+def build_server():
+    # TODO: Fix assumption that project dir is at ../..
+    # TODO: Make cmd file location more configurable
+    # TODO: Unhardcode tempfile suffix
+
+    fd, build_filename = tempfile.mkstemp(suffix="_go-sqs")
+    os.close(fd)
+    env = os.environ.copy()
+    cwd = os.path.abspath(os.path.dirname(os.path.abspath(__file__)) + "/../..")
+    proc = subprocess.Popen(
+        ["/usr/local/bin/go", "build", "-o", build_filename, "cmd/go-sqs.go"],
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    out, err = proc.communicate()
+    errcode = proc.returncode
+    if errcode > 0:
+        print(
+            "Build failure\nErr code: {}\nOut: {}\nErr: {}\n".format(errcode, out, err)
+        )
+        assert errcode == 0
+
+    return build_filename
+
+
+@pytest.fixture(scope="session", autouse=True)
+def run_server(request):
+    build_filename = build_server()
+    proc = subprocess.Popen([build_filename, PORT])
+    # TODO: get rid of time sync and do a liveness hook instead
+    time.sleep(0.1)
+    request.addfinalizer(lambda: stop_server(proc))
+
+
+def stop_server(proc):
+    proc.kill()
 
 
 def create_queue_name_prefix():
