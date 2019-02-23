@@ -91,7 +91,8 @@ func deleteMessage(Queue *util.Queue, ReceiptHandle string) bool {
 	if MessagePtr, ok := Queue.ReceiptHandles.Load(ReceiptHandle); ok {
 		var Message = MessagePtr.(*util.Message)
 		Queue.ReceiptHandles.Delete(ReceiptHandle)
-		Queue.Messages.Delete(Message.MessageID)
+		// Queue.Messages.Delete(Message.MessageID)
+		delete(Queue.Messages2, Message.MessageID)
 		return true
 	}
 
@@ -175,11 +176,12 @@ func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
 	}
 	var Queue = QueuePtr.(*util.Queue)
 
-	var NumberOfMessages = 0
-	Queue.Messages.Range(func(k, v interface{}) bool {
-		NumberOfMessages++
-		return true
-	})
+	// var NumberOfMessages = 0
+	// Queue.Messages.Range(func(k, v interface{}) bool {
+	// NumberOfMessages++
+	// return true
+	// })
+	var NumberOfMessages = len(Queue.Messages2)
 
 	var Result = fmt.Sprintf(`<Attribute>
 	<Name>QueueArn</Name>
@@ -294,18 +296,28 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 
 	var FoundMessages [10]*util.Message
 	var NumFoundMessages = 0
-	Queue.Messages.Range(func(MessageID, MessagePtr interface{}) bool {
-		var Message = MessagePtr.(*util.Message)
+	for _, Message := range Queue.Messages2 {
 		if Message.VisibilityDeadline < Now {
 			FoundMessages[NumFoundMessages] = Message
 			NumFoundMessages++
 
 			if NumFoundMessages == MaxNumberOfMessages {
-				return false
+				break
 			}
 		}
-		return true
-	})
+	}
+	// Queue.Messages.Range(func(MessageID, MessagePtr interface{}) bool {
+	// 	var Message = MessagePtr.(*util.Message)
+	// 	if Message.VisibilityDeadline < Now {
+	// 		FoundMessages[NumFoundMessages] = Message
+	// 		NumFoundMessages++
+
+	// 		if NumFoundMessages == MaxNumberOfMessages {
+	// 			return false
+	// 		}
+	// 	}
+	// 	return true
+	// })
 
 	var Result = ""
 
@@ -378,7 +390,8 @@ func sendMessage(Queue *util.Queue, MessageBody string, DelaySeconds int) (*util
 		SentTimestamp:                    time.Now().Unix(),
 		VisibilityDeadline:               VisibilityDeadline,
 	}
-	Queue.Messages.Store(Message.MessageID, &Message)
+
+	Queue.SendChannel <- &Message
 	return &Message, true, "", ""
 }
 
