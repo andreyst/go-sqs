@@ -10,7 +10,7 @@ import (
 )
 
 // MaxBatchSize defines what could be the maximum size of the batch in SQS.
-// It drives contraints in receive functions and in validators.
+// It drives constraints in receive functions and in validators.
 const MaxBatchSize = 10
 
 // Queue TODO: add comment
