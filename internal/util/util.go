@@ -2,10 +2,10 @@ package util
 
 import (
 	"fmt"
-	"go-sqs/events"
 	"sync"
 	"time"
 
+	"github.com/andreyst/go-sqs/internal/events"
 	uuid "github.com/satori/go.uuid"
 )
 

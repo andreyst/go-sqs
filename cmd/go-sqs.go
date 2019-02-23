@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
-	handlers "go-sqs/handlers"
-	util "go-sqs/util"
+	"github.com/andreyst/go-sqs/internal/handlers"
+	"github.com/andreyst/go-sqs/internal/util"
 )
 
 // Queues TODO: add comment

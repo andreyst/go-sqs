@@ -2,14 +2,14 @@ package handlers
 
 import (
 	"fmt"
-	"go-sqs/events"
-	"go-sqs/util"
 	"net/url"
 	"regexp"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/andreyst/go-sqs/internal/events"
+	"github.com/andreyst/go-sqs/internal/util"
 	uuid "github.com/satori/go.uuid"
 )
 
