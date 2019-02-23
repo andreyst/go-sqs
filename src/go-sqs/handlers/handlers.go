@@ -27,6 +27,7 @@ func CreateQueue(Parameters url.Values, Queues *sync.Map) (string, int) {
 	if QueueName == "" {
 		return util.Error("MissingParameter", "A required parameter QueueName is not supplied.")
 	}
+
 	var IsValidQueueName, err = regexp.MatchString("^[a-zA-Z0-9_\\-]{1,80}$", QueueName)
 	if !IsValidQueueName || err != nil {
 		return util.Error("InvalidParameterValue", "The specified queue name is not valid.")
