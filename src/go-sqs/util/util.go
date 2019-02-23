@@ -97,6 +97,7 @@ func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
 		return ExistingQueue, ExistingQueueURL
 	}
 
+	// TODO: Move protocol/hostname prefix to app config
 	var QueueURL = fmt.Sprintf("http://localhost/%s", QueueName)
 	var Queue = Queue{
 		QueueName: QueueName,
