@@ -161,6 +161,8 @@ func receiveMessage(Queue *Queue, Event events.ReceiveRequestEvent) {
 			if Message.ReceiptHandle != "" {
 				Queue.ReceiptHandles.Delete(Message.ReceiptHandle)
 			}
+			// TODO: Refactor to put both message ID and unique receipt handle inside
+			// eliminate the need for separate map for receipt handles
 			Message.ReceiptHandle = uuid.Must(uuid.NewV4()).String()
 			Queue.ReceiptHandles.Store(Message.ReceiptHandle, Message)
 			Message.VisibilityDeadline = Now + int64(Event.VisibilityTimeout)
