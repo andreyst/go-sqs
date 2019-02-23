@@ -40,7 +40,6 @@ func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []str
 	// TODO: Validate if there are dangling IDs / IDs starting not from 1 / etc
 	// TODO: Validate if there are incomplete pairs of ReceiptHandle/Id entries
 	// TODO: Validate if batch request is not empty (AWS.SimpleQueueService.EmptyBatchRequest)
-	// TODO: Validate that there are no more than 10 entries in batch
 	// TODO: Validate that IDs are distinct (AWS.SimpleQueueService.BatchEntryIdsNotDistinct)
 	// TODO: Validate that all required RequiredKeys are present
 	var BatchValidationResult = batchValidationResult{
@@ -54,7 +53,7 @@ func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []str
 			break
 		}
 
-		if i == 11 {
+		if i == util.MaxBatchSize+1 {
 			BatchValidationResult.ErrorCode = "AWS.SimpleQueueService.TooManyEntriesInBatchRequest"
 			BatchValidationResult.ErrorMessage = "The batch request contains more entries than permissible."
 			return BatchValidationResult
@@ -292,8 +291,8 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 	if RawMaxNumberOfMessages != "" {
 		var err error
 		MaxNumberOfMessages, err = strconv.Atoi(RawMaxNumberOfMessages)
-		if err != nil || MaxNumberOfMessages < 1 || MaxNumberOfMessages > 10 {
-			return util.Error("InvalidParameterValue", fmt.Sprintf("Value %s for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and 10", RawMaxNumberOfMessages))
+		if err != nil || MaxNumberOfMessages < 1 || MaxNumberOfMessages > util.MaxBatchSize {
+			return util.Error("InvalidParameterValue", fmt.Sprintf("Value %s for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and %d", RawMaxNumberOfMessages, util.MaxBatchSize))
 		}
 	}
 

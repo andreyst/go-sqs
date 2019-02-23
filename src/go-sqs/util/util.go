@@ -8,6 +8,10 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
+// MaxBatchSize defines what could be the maximum size of the batch in SQS.
+// It drives contraints in receive functions and in validators.
+const MaxBatchSize = 10
+
 // Queue TODO: add comment
 type Queue struct {
 	QueueName                             string
