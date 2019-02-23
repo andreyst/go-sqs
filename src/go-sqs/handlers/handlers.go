@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"go-sqs/events"
 	"go-sqs/util"
 	"net/url"
 	"regexp"
@@ -177,13 +178,7 @@ func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
 	}
 	var Queue = QueuePtr.(*util.Queue)
 
-	// var NumberOfMessages = 0
-	// Queue.Messages.Range(func(k, v interface{}) bool {
-	// NumberOfMessages++
-	// return true
-	// })
 	var NumberOfMessages = len(Queue.Messages2)
-
 	var Result = fmt.Sprintf(`<Attribute>
 	<Name>QueueArn</Name>
 	<Value>%s</Value>
@@ -274,7 +269,6 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
 	var Queue = QueuePtr.(*util.Queue)
-	var Now = time.Now().Unix()
 	var RawVisibilityTimeout = Parameters.Get("VisibilityTimeout")
 	var VisibilityTimeout = 30
 	// TODO: Validate VisibilityTimeout value properly
@@ -296,73 +290,44 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 		}
 	}
 
-	var FoundMessages [10]*util.Message
-	var NumFoundMessages = 0
-	for _, Message := range Queue.Messages2 {
-		if Message.VisibilityDeadline < Now {
-			FoundMessages[NumFoundMessages] = Message
-			NumFoundMessages++
-
-			if NumFoundMessages == MaxNumberOfMessages {
-				break
-			}
-		}
+	var ReturnChan = make(chan events.ReceiveResponseEvent)
+	Queue.ReceiveChannel <- events.ReceiveRequestEvent{
+		MaxNumberOfMessages: MaxNumberOfMessages,
+		VisibilityTimeout:   VisibilityTimeout,
+		ReturnChan:          ReturnChan,
 	}
-	// Queue.Messages.Range(func(MessageID, MessagePtr interface{}) bool {
-	// 	var Message = MessagePtr.(*util.Message)
-	// 	if Message.VisibilityDeadline < Now {
-	// 		FoundMessages[NumFoundMessages] = Message
-	// 		NumFoundMessages++
+	var ReceiveResponseEvent = <-ReturnChan
 
-	// 		if NumFoundMessages == MaxNumberOfMessages {
-	// 			return false
-	// 		}
-	// 	}
-	// 	return true
-	// })
+	var ReceiveMessageResult = ""
 
-	var Result = ""
+	for i := 0; i < len(ReceiveResponseEvent.Messages); i++ {
+		var FoundMessage = ReceiveResponseEvent.Messages[i].(*util.Message)
 
-	if NumFoundMessages > 0 {
-		for i := 0; i < NumFoundMessages; i++ {
-			var FoundMessage = FoundMessages[i]
-			FoundMessage.VisibilityDeadline = Now + int64(VisibilityTimeout)
-			if FoundMessage.ApproximateFirstReceiveTimestamp == 0 {
-				FoundMessage.ApproximateFirstReceiveTimestamp = time.Now().Unix()
-			}
-			FoundMessage.ApproximateReceiveCount++
-			if FoundMessage.ReceiptHandle != "" {
-				Queue.ReceiptHandles.Delete(FoundMessage.ReceiptHandle)
-			}
-			FoundMessage.ReceiptHandle = uuid.Must(uuid.NewV4()).String()
-			Queue.ReceiptHandles.Store(FoundMessage.ReceiptHandle, FoundMessage)
-
-			Result += fmt.Sprintf(`<Message>
-			<MessageId>%s</MessageId>
-			<ReceiptHandle>%s</ReceiptHandle>
-			<MD5OfBody>%s</MD5OfBody>
-			<Body>%s</Body>
-			<Attribute>
-				<Name>SenderId</Name>
-				<Value>%s</Value>
-			</Attribute>
-			<Attribute>
-				<Name>SentTimestamp</Name>
-				<Value>%d</Value>
-			</Attribute>
-			<Attribute>
-				<Name>ApproximateReceiveCount</Name>
-				<Value>%d</Value>
-			</Attribute>
-			<Attribute>
-				<Name>ApproximateFirstReceiveTimestamp</Name>
-				<Value>%d</Value>
-			</Attribute>
-			</Message>`, FoundMessage.MessageID, FoundMessage.ReceiptHandle, FoundMessage.MD5OfMessageBody, FoundMessage.Body, FoundMessage.SenderID, FoundMessage.SentTimestamp, FoundMessage.ApproximateReceiveCount, FoundMessage.ApproximateFirstReceiveTimestamp)
-		}
+		ReceiveMessageResult += fmt.Sprintf(`<Message>
+		<MessageId>%s</MessageId>
+		<ReceiptHandle>%s</ReceiptHandle>
+		<MD5OfBody>%s</MD5OfBody>
+		<Body>%s</Body>
+		<Attribute>
+			<Name>SenderId</Name>
+			<Value>%s</Value>
+		</Attribute>
+		<Attribute>
+			<Name>SentTimestamp</Name>
+			<Value>%d</Value>
+		</Attribute>
+		<Attribute>
+			<Name>ApproximateReceiveCount</Name>
+			<Value>%d</Value>
+		</Attribute>
+		<Attribute>
+			<Name>ApproximateFirstReceiveTimestamp</Name>
+			<Value>%d</Value>
+		</Attribute>
+		</Message>`, FoundMessage.MessageID, FoundMessage.ReceiptHandle, FoundMessage.MD5OfMessageBody, FoundMessage.Body, FoundMessage.SenderID, FoundMessage.SentTimestamp, FoundMessage.ApproximateReceiveCount, FoundMessage.ApproximateFirstReceiveTimestamp)
 	}
 
-	return util.Success("ReceiveMessage", Result)
+	return util.Success("ReceiveMessage", ReceiveMessageResult)
 }
 
 func sendMessage(Queue *util.Queue, MessageBody string, DelaySeconds int) (*util.Message, bool, string, string) {

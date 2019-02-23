@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"go-sqs/events"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type Queue struct {
 	Messages                              sync.Map
 	Messages2                             map[string]*Message
 	SendChannel                           chan *Message
+	ReceiveChannel                        chan events.ReceiveRequestEvent
 	ReceiptHandles                        sync.Map
 }
 
@@ -119,6 +121,7 @@ func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
 		ReceiveMessageWaitTimeSeconds:         30,
 		Messages2:                             make(map[string]*Message),
 		SendChannel:                           make(chan *Message),
+		ReceiveChannel:                        make(chan events.ReceiveRequestEvent),
 	}
 	Queues.Store(QueueURL, &Queue)
 
@@ -127,9 +130,49 @@ func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
 }
 
 func queueActor(Queue *Queue) {
-	var Message *Message
 	for {
-		Message = <-Queue.SendChannel
-		Queue.Messages2[Message.MessageID] = Message
+		select {
+		case Message := <-Queue.SendChannel:
+			sendMessage(Queue, Message)
+		case ReceiveRequestEvent := <-Queue.ReceiveChannel:
+			receiveMessage(Queue, ReceiveRequestEvent)
+		}
+	}
+}
+
+func sendMessage(Queue *Queue, Message *Message) {
+	// TODO: Check if there's a race condition with reading this field somewhere else
+	Queue.ApproximateNumberOfMessages++
+	Queue.Messages2[Message.MessageID] = Message
+}
+
+func receiveMessage(Queue *Queue, ReceiveRequestEvent events.ReceiveRequestEvent) {
+	var Now = time.Now().Unix()
+	var FoundMessages = make([]interface{}, MaxBatchSize)
+	var NumFoundMessages = 0
+	for _, Message := range Queue.Messages2 {
+		if Message.VisibilityDeadline < Now {
+			FoundMessages[NumFoundMessages] = Message
+
+			if Message.ReceiptHandle != "" {
+				Queue.ReceiptHandles.Delete(Message.ReceiptHandle)
+			}
+			Message.ReceiptHandle = uuid.Must(uuid.NewV4()).String()
+			Queue.ReceiptHandles.Store(Message.ReceiptHandle, Message)
+			Message.VisibilityDeadline = Now + int64(ReceiveRequestEvent.VisibilityTimeout)
+			if Message.ApproximateFirstReceiveTimestamp == 0 {
+				Message.ApproximateFirstReceiveTimestamp = time.Now().Unix()
+			}
+			Message.ApproximateReceiveCount++
+
+			NumFoundMessages++
+			if NumFoundMessages == ReceiveRequestEvent.MaxNumberOfMessages {
+				break
+			}
+		}
+	}
+
+	ReceiveRequestEvent.ReturnChan <- events.ReceiveResponseEvent{
+		Messages: FoundMessages[:NumFoundMessages],
 	}
 }
