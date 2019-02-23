@@ -12,3 +12,14 @@ type ReceiveResponseEvent struct {
 	// TODO: Break dependency cycle and make Message a concrete type
 	Messages []interface{}
 }
+
+// DeleteRequestEvent represents a request to delete a message.
+type DeleteRequestEvent struct {
+	ReceiptHandle string
+	ReturnChan    chan DeleteResponseEvent
+}
+
+// DeleteResponseEvent represents a response to a request to delete a message.
+type DeleteResponseEvent struct {
+	Ok bool
+}

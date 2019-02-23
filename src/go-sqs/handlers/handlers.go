@@ -89,16 +89,16 @@ func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []str
 	return BatchValidationResult
 }
 
-func deleteMessage(Queue *util.Queue, ReceiptHandle string) bool {
-	if MessagePtr, ok := Queue.ReceiptHandles.Load(ReceiptHandle); ok {
-		var Message = MessagePtr.(*util.Message)
-		Queue.ReceiptHandles.Delete(ReceiptHandle)
-		// Queue.Messages.Delete(Message.MessageID)
-		delete(Queue.Messages2, Message.MessageID)
-		return true
+func deleteMessage(Queue *util.Queue, ReceiptHandle string) events.DeleteResponseEvent {
+	var ReturnChan = make(chan events.DeleteResponseEvent)
+	Queue.DeleteChannel <- events.DeleteRequestEvent{
+		ReceiptHandle: ReceiptHandle,
+		ReturnChan:    ReturnChan,
 	}
 
-	return false
+	var event = <-ReturnChan
+
+	return event
 }
 
 // DeleteMessage TODO: add comment
@@ -112,8 +112,8 @@ func DeleteMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 
 	// TODO: Validate ReceiptHandle format
 	var ReceiptHandle = Parameters.Get("ReceiptHandle")
-	ok = deleteMessage(Queue, ReceiptHandle)
-	if !ok {
+	var DeleteResponseEvent = deleteMessage(Queue, ReceiptHandle)
+	if !DeleteResponseEvent.Ok {
 		return util.Error("ReceiptHandleIsInvalid", fmt.Sprintf("The input receipt handle \"%s\" is not a valid receipt handle.", ReceiptHandle))
 	}
 
@@ -144,8 +144,8 @@ func DeleteMessageBatch(Parameters url.Values, Queues *sync.Map) (string, int) {
 		// TODO: Validate ReceiptHandle format
 		var ReceiptHandle = Parameters.Get(fmt.Sprintf("DeleteMessageBatchRequestEntry.%d.ReceiptHandle", i))
 
-		ok = deleteMessage(Queue, ReceiptHandle)
-		if ok {
+		var DeleteResponseEvent = deleteMessage(Queue, ReceiptHandle)
+		if DeleteResponseEvent.Ok {
 			SuccessfulResult += fmt.Sprintf("<DeleteMessageBatchResultEntry><Id>%s</Id></DeleteMessageBatchResultEntry>", ReceiptHandleID)
 		} else {
 			ErrorResult += fmt.Sprintf("<BatchResultErrorEntry><Id>%s</Id><Code>ReceiptHandleIsInvalid</Code><Message>The input receipt handle is invalid.</Message><SenderFault>true</SenderFault></BatchResultErrorEntry>", ReceiptHandleID)
@@ -295,10 +295,10 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 		VisibilityTimeout:   VisibilityTimeout,
 		ReturnChan:          ReturnChan,
 	}
+
 	var ReceiveResponseEvent = <-ReturnChan
 
 	var ReceiveMessageResult = ""
-
 	for i := 0; i < len(ReceiveResponseEvent.Messages); i++ {
 		var FoundMessage = ReceiveResponseEvent.Messages[i].(*util.Message)
 

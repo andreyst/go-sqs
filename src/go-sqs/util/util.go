@@ -31,6 +31,7 @@ type Queue struct {
 	Messages2                             map[string]*Message
 	SendChannel                           chan *Message
 	ReceiveChannel                        chan events.ReceiveRequestEvent
+	DeleteChannel                         chan events.DeleteRequestEvent
 	ReceiptHandles                        sync.Map
 }
 
@@ -122,6 +123,7 @@ func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
 		Messages2:                             make(map[string]*Message),
 		SendChannel:                           make(chan *Message),
 		ReceiveChannel:                        make(chan events.ReceiveRequestEvent),
+		DeleteChannel:                         make(chan events.DeleteRequestEvent),
 	}
 	Queues.Store(QueueURL, &Queue)
 
@@ -134,8 +136,10 @@ func queueActor(Queue *Queue) {
 		select {
 		case Message := <-Queue.SendChannel:
 			sendMessage(Queue, Message)
-		case ReceiveRequestEvent := <-Queue.ReceiveChannel:
-			receiveMessage(Queue, ReceiveRequestEvent)
+		case event := <-Queue.ReceiveChannel:
+			receiveMessage(Queue, event)
+		case event := <-Queue.DeleteChannel:
+			deleteMessage(Queue, event)
 		}
 	}
 }
@@ -146,7 +150,7 @@ func sendMessage(Queue *Queue, Message *Message) {
 	Queue.Messages2[Message.MessageID] = Message
 }
 
-func receiveMessage(Queue *Queue, ReceiveRequestEvent events.ReceiveRequestEvent) {
+func receiveMessage(Queue *Queue, Event events.ReceiveRequestEvent) {
 	var Now = time.Now().Unix()
 	var FoundMessages = make([]interface{}, MaxBatchSize)
 	var NumFoundMessages = 0
@@ -159,20 +163,38 @@ func receiveMessage(Queue *Queue, ReceiveRequestEvent events.ReceiveRequestEvent
 			}
 			Message.ReceiptHandle = uuid.Must(uuid.NewV4()).String()
 			Queue.ReceiptHandles.Store(Message.ReceiptHandle, Message)
-			Message.VisibilityDeadline = Now + int64(ReceiveRequestEvent.VisibilityTimeout)
+			Message.VisibilityDeadline = Now + int64(Event.VisibilityTimeout)
 			if Message.ApproximateFirstReceiveTimestamp == 0 {
 				Message.ApproximateFirstReceiveTimestamp = time.Now().Unix()
 			}
 			Message.ApproximateReceiveCount++
 
 			NumFoundMessages++
-			if NumFoundMessages == ReceiveRequestEvent.MaxNumberOfMessages {
+			if NumFoundMessages == Event.MaxNumberOfMessages {
 				break
 			}
 		}
 	}
 
-	ReceiveRequestEvent.ReturnChan <- events.ReceiveResponseEvent{
+	Event.ReturnChan <- events.ReceiveResponseEvent{
 		Messages: FoundMessages[:NumFoundMessages],
+	}
+}
+
+func deleteMessage(Queue *Queue, Event events.DeleteRequestEvent) {
+	var MessagePtr, ok = Queue.ReceiptHandles.Load(Event.ReceiptHandle)
+	if !ok {
+		Event.ReturnChan <- events.DeleteResponseEvent{
+			Ok: false,
+		}
+		return
+	}
+
+	var Message = MessagePtr.(*Message)
+	Queue.ReceiptHandles.Delete(Event.ReceiptHandle)
+	delete(Queue.Messages2, Message.MessageID)
+	Queue.ApproximateNumberOfMessages--
+	Event.ReturnChan <- events.DeleteResponseEvent{
+		Ok: true,
 	}
 }
