@@ -178,7 +178,6 @@ func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
 	}
 	var Queue = QueuePtr.(*util.Queue)
 
-	var NumberOfMessages = len(Queue.Messages2)
 	var Result = fmt.Sprintf(`<Attribute>
 	<Name>QueueArn</Name>
 	<Value>%s</Value>
@@ -224,7 +223,7 @@ func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
 	<Value>%d</Value>
   </Attribute>`,
 		Queue.QueueArn,
-		NumberOfMessages,
+		Queue.ApproximateNumberOfMessages,
 		Queue.ApproximateNumberOfMessagesNotVisible,
 		Queue.ApproximateNumberOfMessagesDelayed,
 		Queue.CreatedTimestamp,
