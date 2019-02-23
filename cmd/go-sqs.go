@@ -7,46 +7,59 @@ import (
 	"os"
 	"sync"
 
+	"github.com/andreyst/go-sqs/internal/server"
+	uuid "github.com/satori/go.uuid"
+
 	"github.com/andreyst/go-sqs/internal/handlers"
-	"github.com/andreyst/go-sqs/internal/util"
 )
 
 // Queues TODO: add comment
 var queues sync.Map
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	// TODO: Validate it is a POST request
+	// TODO: Handle also GET parameters
+	// TODO: Handle headers passed as GET parameters
 	r.ParseForm()
 
+	var req = server.Request{
+		ID:     uuid.Must(uuid.NewV4()).String(),
+		Params: r.Form,
+	}
+	var resp = server.Response{
+		Req: req,
+	}
+
 	var Action = r.Form.Get("Action")
-	var Response = ""
+	var ResponseBody = ""
 	var StatusCode = 0
 	switch Action {
 	case "CreateQueue":
-		Response, StatusCode = handlers.CreateQueue(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.CreateQueue(req, resp, &queues)
 	case "DeleteMessage":
-		Response, StatusCode = handlers.DeleteMessage(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.DeleteMessage(req, resp, &queues)
 	case "DeleteMessageBatch":
-		Response, StatusCode = handlers.DeleteMessageBatch(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.DeleteMessageBatch(req, resp, &queues)
 	case "DeleteQueue":
-		Response, StatusCode = handlers.DeleteQueue(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.DeleteQueue(req, resp, &queues)
 	case "GetQueueAttributes":
-		Response, StatusCode = handlers.GetQueueAttributes(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.GetQueueAttributes(req, resp, &queues)
 	case "GetQueueUrl":
-		Response, StatusCode = handlers.GetQueueURL(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.GetQueueURL(req, resp, &queues)
 	case "ListQueues":
-		Response, StatusCode = handlers.ListQueues(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.ListQueues(req, resp, &queues)
 	case "SendMessage":
-		Response, StatusCode = handlers.SendMessage(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.SendMessage(req, resp, &queues)
 	case "SendMessageBatch":
-		Response, StatusCode = handlers.SendMessageBatch(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.SendMessageBatch(req, resp, &queues)
 	case "ReceiveMessage":
-		Response, StatusCode = handlers.ReceiveMessage(r.Form, &queues)
+		ResponseBody, StatusCode = handlers.ReceiveMessage(req, resp, &queues)
 	default:
-		Response, StatusCode = util.Error("InvalidAction", "The action or operation requested is invalid. Verify that the action is typed correctly.")
+		ResponseBody, StatusCode = resp.Error("InvalidAction", "The action or operation requested is invalid. Verify that the action is typed correctly.")
 	}
 
 	w.WriteHeader(StatusCode)
-	fmt.Fprintf(w, Response)
+	fmt.Fprintf(w, ResponseBody)
 }
 
 func main() {

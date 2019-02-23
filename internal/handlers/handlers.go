@@ -9,42 +9,21 @@ import (
 	"time"
 
 	"github.com/andreyst/go-sqs/internal/events"
+	"github.com/andreyst/go-sqs/internal/limits"
+	"github.com/andreyst/go-sqs/internal/queue"
+	"github.com/andreyst/go-sqs/internal/server"
 	"github.com/andreyst/go-sqs/internal/util"
+	"github.com/andreyst/go-sqs/internal/validation"
 	uuid "github.com/satori/go.uuid"
 )
 
-type batchValidationResult struct {
-	Ok           bool
-	BatchSize    int
-	ErrorCode    string
-	ErrorMessage string
-}
-
-// CreateQueue TODO: add comment
-func CreateQueue(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueName = Parameters.Get("QueueName")
-	// TODO: Move validation to a separate validator
-	if QueueName == "" {
-		return util.Error("MissingParameter", "A required parameter QueueName is not supplied.")
-	}
-
-	var IsValidQueueName, err = regexp.MatchString("^[a-zA-Z0-9_\\-]{1,80}$", QueueName)
-	if !IsValidQueueName || err != nil {
-		return util.Error("InvalidParameterValue", "The specified queue name is not valid.")
-	}
-
-	var _, QueueURL = util.CreateQueue(Queues, QueueName)
-	var CreateQueueResult = fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
-	return util.Success("CreateQueue", CreateQueueResult)
-}
-
-func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []string) batchValidationResult {
+func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []string) validation.BatchValidationResult {
 	// TODO: Validate if there are dangling IDs / IDs starting not from 1 / etc
 	// TODO: Validate if there are incomplete pairs of ReceiptHandle/Id entries
 	// TODO: Validate if batch request is not empty (AWS.SimpleQueueService.EmptyBatchRequest)
 	// TODO: Validate that IDs are distinct (AWS.SimpleQueueService.BatchEntryIdsNotDistinct)
 	// TODO: Validate that all required RequiredKeys are present
-	var BatchValidationResult = batchValidationResult{
+	var BatchValidationResult = validation.BatchValidationResult{
 		Ok: false,
 	}
 	var BatchSize = 0
@@ -55,7 +34,7 @@ func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []str
 			break
 		}
 
-		if i == util.MaxBatchSize+1 {
+		if i == limits.MaxBatchSize+1 {
 			BatchValidationResult.ErrorCode = "AWS.SimpleQueueService.TooManyEntriesInBatchRequest"
 			BatchValidationResult.ErrorMessage = "The batch request contains more entries than permissible."
 			return BatchValidationResult
@@ -90,7 +69,25 @@ func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []str
 	return BatchValidationResult
 }
 
-func deleteMessage(Queue *util.Queue, ReceiptHandle string) events.DeleteResponseEvent {
+// CreateQueue TODO: add comment
+func CreateQueue(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueName = req.Params.Get("QueueName")
+	// TODO: Move validation to a separate validator
+	if QueueName == "" {
+		return resp.Error("MissingParameter", "A required parameter QueueName is not supplied.")
+	}
+
+	var IsValidQueueName, err = regexp.MatchString("^[a-zA-Z0-9_\\-]{1,80}$", QueueName)
+	if !IsValidQueueName || err != nil {
+		return resp.Error("InvalidParameterValue", "The specified queue name is not valid.")
+	}
+
+	var _, QueueURL = util.CreateQueue(Queues, QueueName)
+	var CreateQueueResult = fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
+	return resp.Success("CreateQueue", CreateQueueResult)
+}
+
+func deleteMessage(Queue *queue.Queue, ReceiptHandle string) events.DeleteResponseEvent {
 	var ReturnChan = make(chan events.DeleteResponseEvent)
 	Queue.DeleteChannel <- events.DeleteRequestEvent{
 		ReceiptHandle: ReceiptHandle,
@@ -103,47 +100,47 @@ func deleteMessage(Queue *util.Queue, ReceiptHandle string) events.DeleteRespons
 }
 
 // DeleteMessage TODO: add comment
-func DeleteMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueURL = Parameters.Get("QueueUrl")
+func DeleteMessage(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueURL = req.Params.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
-	var Queue = QueuePtr.(*util.Queue)
+	var Queue = QueuePtr.(*queue.Queue)
 
 	// TODO: Validate ReceiptHandle format
-	var ReceiptHandle = Parameters.Get("ReceiptHandle")
+	var ReceiptHandle = req.Params.Get("ReceiptHandle")
 	var DeleteResponseEvent = deleteMessage(Queue, ReceiptHandle)
 	if !DeleteResponseEvent.Ok {
-		return util.Error("ReceiptHandleIsInvalid", fmt.Sprintf("The input receipt handle \"%s\" is not a valid receipt handle.", ReceiptHandle))
+		return resp.Error("ReceiptHandleIsInvalid", fmt.Sprintf("The input receipt handle \"%s\" is not a valid receipt handle.", ReceiptHandle))
 	}
 
-	return util.Success("DeleteMessage", "")
+	return resp.Success("DeleteMessage", "")
 }
 
 // DeleteMessageBatch TODO: add comment
-func DeleteMessageBatch(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueURL = Parameters.Get("QueueUrl")
+func DeleteMessageBatch(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueURL = req.Params.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
-	var Queue = QueuePtr.(*util.Queue)
+	var Queue = QueuePtr.(*queue.Queue)
 
-	var BatchValidationResult = validateBatch(Parameters, "DeleteMessageBatchRequestEntry", []string{
+	var BatchValidationResult = validateBatch(req.Params, "DeleteMessageBatchRequestEntry", []string{
 		"Id",
 		"ReceiptHandle",
 	}[:])
 	if !BatchValidationResult.Ok {
-		return util.Error(BatchValidationResult.ErrorCode, BatchValidationResult.ErrorMessage)
+		return resp.Error(BatchValidationResult.ErrorCode, BatchValidationResult.ErrorMessage)
 	}
 
 	var SuccessfulResult = ""
 	var ErrorResult = ""
 	for i := 1; i <= BatchValidationResult.BatchSize; i++ {
-		var ReceiptHandleID = Parameters.Get(fmt.Sprintf("DeleteMessageBatchRequestEntry.%d.Id", i))
+		var ReceiptHandleID = req.Params.Get(fmt.Sprintf("DeleteMessageBatchRequestEntry.%d.Id", i))
 		// TODO: Validate ReceiptHandle format
-		var ReceiptHandle = Parameters.Get(fmt.Sprintf("DeleteMessageBatchRequestEntry.%d.ReceiptHandle", i))
+		var ReceiptHandle = req.Params.Get(fmt.Sprintf("DeleteMessageBatchRequestEntry.%d.ReceiptHandle", i))
 
 		var DeleteResponseEvent = deleteMessage(Queue, ReceiptHandle)
 		if DeleteResponseEvent.Ok {
@@ -155,29 +152,29 @@ func DeleteMessageBatch(Parameters url.Values, Queues *sync.Map) (string, int) {
 
 	var Result = SuccessfulResult + ErrorResult
 
-	return util.Success("DeleteMessageBatch", Result)
+	return resp.Success("DeleteMessageBatch", Result)
 }
 
 // DeleteQueue TODO: add comment
-func DeleteQueue(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueURL = Parameters.Get("QueueUrl")
+func DeleteQueue(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueURL = req.Params.Get("QueueUrl")
 	var _, ok = Queues.Load(QueueURL)
 	if !ok {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
 	Queues.Delete(QueueURL)
 
-	return util.Success("DeleteQueue", "")
+	return resp.Success("DeleteQueue", "")
 }
 
 // GetQueueAttributes TODO: add comment
-func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueURL = Parameters.Get("QueueUrl")
+func GetQueueAttributes(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueURL = req.Params.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
-	var Queue = QueuePtr.(*util.Queue)
+	var Queue = QueuePtr.(*queue.Queue)
 
 	var Result = fmt.Sprintf(`<Attribute>
 	<Name>QueueArn</Name>
@@ -235,58 +232,58 @@ func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
 		Queue.DelaySeconds,
 		Queue.ReceiveMessageWaitTimeSeconds)
 
-	return util.Success("GetQueueAttributes", Result)
+	return resp.Success("GetQueueAttributes", Result)
 }
 
 // GetQueueURL TODO: add comment
-func GetQueueURL(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueName = Parameters.Get("QueueName")
+func GetQueueURL(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueName = req.Params.Get("QueueName")
 	// TODO: Validate QueueName
 	var Queue, QueueURL = util.GetQueueByName(Queues, QueueName)
 	if Queue == nil {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
 
 	var GetQueueURLResult = fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
-	return util.Success("GetQueueUrl", GetQueueURLResult)
+	return resp.Success("GetQueueUrl", GetQueueURLResult)
 }
 
 // ListQueues TODO: add comment
-func ListQueues(Parameters url.Values, Queues *sync.Map) (string, int) {
+func ListQueues(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
 	var Result = ""
 	Queues.Range(func(QueueURL, v interface{}) bool {
 		Result += fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
 		return true
 	})
-	return util.Success("ListQueues", Result)
+	return resp.Success("ListQueues", Result)
 }
 
 // ReceiveMessage TODO: add comment
-func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueURL = Parameters.Get("QueueUrl")
+func ReceiveMessage(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueURL = req.Params.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
-	var Queue = QueuePtr.(*util.Queue)
-	var RawVisibilityTimeout = Parameters.Get("VisibilityTimeout")
+	var Queue = QueuePtr.(*queue.Queue)
+	var RawVisibilityTimeout = req.Params.Get("VisibilityTimeout")
 	var VisibilityTimeout = 30
 	// TODO: Validate VisibilityTimeout value properly
 	if RawVisibilityTimeout != "" {
 		var err error
 		VisibilityTimeout, err = strconv.Atoi(RawVisibilityTimeout)
 		if err != nil {
-			return util.Error("InvalidParameterValue", fmt.Sprintf("Value %s for parameter VisibilityTimeout is invalid. Reason: Must be between 0 and 43200, if provided", RawVisibilityTimeout))
+			return resp.Error("InvalidParameterValue", fmt.Sprintf("Value %s for parameter VisibilityTimeout is invalid. Reason: Must be between 0 and 43200, if provided", RawVisibilityTimeout))
 		}
 	}
 
-	var RawMaxNumberOfMessages = Parameters.Get("MaxNumberOfMessages")
+	var RawMaxNumberOfMessages = req.Params.Get("MaxNumberOfMessages")
 	var MaxNumberOfMessages = 1
 	if RawMaxNumberOfMessages != "" {
 		var err error
 		MaxNumberOfMessages, err = strconv.Atoi(RawMaxNumberOfMessages)
-		if err != nil || MaxNumberOfMessages < 1 || MaxNumberOfMessages > util.MaxBatchSize {
-			return util.Error("InvalidParameterValue", fmt.Sprintf("Value %s for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and %d", RawMaxNumberOfMessages, util.MaxBatchSize))
+		if err != nil || MaxNumberOfMessages < 1 || MaxNumberOfMessages > limits.MaxBatchSize {
+			return resp.Error("InvalidParameterValue", fmt.Sprintf("Value %s for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and %d", RawMaxNumberOfMessages, limits.MaxBatchSize))
 		}
 	}
 
@@ -301,7 +298,7 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 
 	var ReceiveMessageResult = ""
 	for i := 0; i < len(ReceiveResponseEvent.Messages); i++ {
-		var FoundMessage = ReceiveResponseEvent.Messages[i].(*util.Message)
+		var FoundMessage = ReceiveResponseEvent.Messages[i].(*queue.Message)
 
 		ReceiveMessageResult += fmt.Sprintf(`<Message>
 		<MessageId>%s</MessageId>
@@ -327,10 +324,10 @@ func ReceiveMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 		</Message>`, FoundMessage.MessageID, FoundMessage.ReceiptHandle, FoundMessage.MD5OfMessageBody, FoundMessage.Body, FoundMessage.SenderID, FoundMessage.SentTimestamp, FoundMessage.ApproximateReceiveCount, FoundMessage.ApproximateFirstReceiveTimestamp)
 	}
 
-	return util.Success("ReceiveMessage", ReceiveMessageResult)
+	return resp.Success("ReceiveMessage", ReceiveMessageResult)
 }
 
-func sendMessage(Queue *util.Queue, MessageBody string, DelaySeconds int) (*util.Message, bool, string, string) {
+func sendMessage(Queue *queue.Queue, MessageBody string, DelaySeconds int) (*queue.Message, bool, string, string) {
 	// TODO: Move validation of delay seconds to this method
 	// TODO: Calculate MD5 of message body
 	var MD5OfMessageBody = ""
@@ -346,7 +343,7 @@ func sendMessage(Queue *util.Queue, MessageBody string, DelaySeconds int) (*util
 		VisibilityDeadline = time.Now().Unix() + int64(DelaySeconds)
 	}
 
-	var Message = util.Message{
+	var Message = queue.Message{
 		MessageID:              uuid.Must(uuid.NewV4()).String(),
 		MD5OfMessageBody:       MD5OfMessageBody,
 		MD5OfMessageAttributes: MD5OfMessageAttributes,
@@ -363,62 +360,62 @@ func sendMessage(Queue *util.Queue, MessageBody string, DelaySeconds int) (*util
 }
 
 // SendMessage TODO: add comment
-func SendMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueURL = Parameters.Get("QueueUrl")
+func SendMessage(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueURL = req.Params.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
-	var Queue = QueuePtr.(*util.Queue)
+	var Queue = QueuePtr.(*queue.Queue)
 
-	var RawDelaySeconds = Parameters.Get("DelaySeconds")
+	var RawDelaySeconds = req.Params.Get("DelaySeconds")
 	var DelaySeconds = Queue.DelaySeconds
 	if RawDelaySeconds != "" {
 		var err error
 		if DelaySeconds, err = strconv.Atoi(RawDelaySeconds); err != nil {
-			return util.Error("InvalidParameterValue", fmt.Sprintf("Parameter DelaySeconds should be of type Integer"))
+			return resp.Error("InvalidParameterValue", fmt.Sprintf("Parameter DelaySeconds should be of type Integer"))
 		}
 	}
 
-	var Message *util.Message
+	var Message *queue.Message
 	var ErrorCode, ErrorMessage string
-	Message, ok, ErrorCode, ErrorMessage = sendMessage(Queue, Parameters.Get("MessageBody"), DelaySeconds)
+	Message, ok, ErrorCode, ErrorMessage = sendMessage(Queue, req.Params.Get("MessageBody"), DelaySeconds)
 
 	if !ok {
-		return util.Error(ErrorCode, ErrorMessage)
+		return resp.Error(ErrorCode, ErrorMessage)
 	}
 	var Result = fmt.Sprintf(`<MD5OfMessageBody>%s</MD5OfMessageBody>
 	<MD5OfMessageAttributes>%s</MD5OfMessageAttributes>
 	<MessageId>%s</MessageId>`, Message.MD5OfMessageBody, Message.MD5OfMessageAttributes, Message.MessageID)
 
-	return util.Success("SendMessage", Result)
+	return resp.Success("SendMessage", Result)
 }
 
 // SendMessageBatch TODO: add comment
-func SendMessageBatch(Parameters url.Values, Queues *sync.Map) (string, int) {
-	var QueueURL = Parameters.Get("QueueUrl")
+func SendMessageBatch(req server.Request, resp server.Response, Queues *sync.Map) (string, int) {
+	var QueueURL = req.Params.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
-		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
+		return resp.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
-	var Queue = QueuePtr.(*util.Queue)
+	var Queue = QueuePtr.(*queue.Queue)
 
-	var BatchValidationResult = validateBatch(Parameters, "SendMessageBatchRequestEntry", []string{
+	var BatchValidationResult = validateBatch(req.Params, "SendMessageBatchRequestEntry", []string{
 		"Id",
 		"MessageBody",
 	}[:])
 	if !BatchValidationResult.Ok {
-		return util.Error(BatchValidationResult.ErrorCode, BatchValidationResult.ErrorMessage)
+		return resp.Error(BatchValidationResult.ErrorCode, BatchValidationResult.ErrorMessage)
 	}
 
 	var SuccessfulResult = ""
 	var ErrorResult = ""
 	for i := 1; i <= BatchValidationResult.BatchSize; i++ {
-		var BatchEntryID = Parameters.Get(fmt.Sprintf("SendMessageBatchRequestEntry.%d.Id", i))
-		var MessageBody = Parameters.Get(fmt.Sprintf("SendMessageBatchRequestEntry.%d.MessageBody", i))
+		var BatchEntryID = req.Params.Get(fmt.Sprintf("SendMessageBatchRequestEntry.%d.Id", i))
+		var MessageBody = req.Params.Get(fmt.Sprintf("SendMessageBatchRequestEntry.%d.MessageBody", i))
 
 		var DelaySeconds = Queue.DelaySeconds
-		var RawDelaySeconds = Parameters.Get(fmt.Sprintf("SendMessageBatchRequestEntry.%d.DelaySeconds", i))
+		var RawDelaySeconds = req.Params.Get(fmt.Sprintf("SendMessageBatchRequestEntry.%d.DelaySeconds", i))
 		if RawDelaySeconds != "" {
 			var err error
 			DelaySeconds, err = strconv.Atoi(RawDelaySeconds)
@@ -438,5 +435,5 @@ func SendMessageBatch(Parameters url.Values, Queues *sync.Map) (string, int) {
 
 	var Result = SuccessfulResult + ErrorResult
 
-	return util.Success("SendMessageBatch", Result)
+	return resp.Success("SendMessageBatch", Result)
 }

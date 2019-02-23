@@ -6,86 +6,18 @@ import (
 	"time"
 
 	"github.com/andreyst/go-sqs/internal/events"
+	"github.com/andreyst/go-sqs/internal/limits"
+	"github.com/andreyst/go-sqs/internal/queue"
 	uuid "github.com/satori/go.uuid"
 )
 
-// MaxBatchSize defines what could be the maximum size of the batch in SQS.
-// It drives constraints in receive functions and in validators.
-const MaxBatchSize = 10
-
-// Queue TODO: add comment
-type Queue struct {
-	QueueName                             string
-	QueueArn                              string
-	ApproximateNumberOfMessages           int64
-	ApproximateNumberOfMessagesNotVisible int64
-	ApproximateNumberOfMessagesDelayed    int64
-	CreatedTimestamp                      int64
-	LastModifiedTimestamp                 int64
-	VisibilityTimeout                     int
-	MaximumMessageSize                    int
-	MessageRetentionPeriod                int
-	DelaySeconds                          int
-	ReceiveMessageWaitTimeSeconds         int
-	Messages                              sync.Map
-	Messages2                             map[string]*Message
-	SendChannel                           chan *Message
-	ReceiveChannel                        chan events.ReceiveRequestEvent
-	DeleteChannel                         chan events.DeleteRequestEvent
-	ReceiptHandles                        sync.Map
-}
-
-// Message TODO: add comment
-type Message struct {
-	MessageID                        string
-	Body                             string
-	MD5OfMessageBody                 string
-	MD5OfMessageAttributes           string
-	SenderID                         string
-	ReceiptHandle                    string
-	ApproximateFirstReceiveTimestamp int64
-	ApproximateReceiveCount          int
-	SentTimestamp                    int64
-	VisibilityDeadline               int64
-}
-
-// CreateRequestID TODO: add comment
-func CreateRequestID() string {
-	return uuid.Must(uuid.NewV4()).String()
-}
-
-// Success TODO: add comment
-func Success(Action string, Result string) (string, int) {
-	var RequestID = CreateRequestID()
-	return fmt.Sprintf(`<%sResponse>
-	<%sResult>%s</%sResult>
-	<ResponseMetadata>
-		<RequestId>%s</RequestId>
-	</ResponseMetadata>
-</%sResponse>`, Action, Action, Result, Action, RequestID, Action), 200
-}
-
-// Error TODO: add comment
-func Error(ErrorCode string, ErrorMessage string) (string, int) {
-	var RequestID = CreateRequestID()
-	return fmt.Sprintf(`<ErrorResponse>
-  <Error>
-    <Type>Sender</Type>
-    <Code>%s</Code>
-    <Message>%s</Message>
-    <Detail/>
-  </Error>
-  <RequestId>%s</RequestId>
-</ErrorResponse>`, ErrorCode, ErrorMessage, RequestID), 400
-}
-
 // GetQueueByName TODO: Add comment
-func GetQueueByName(Queues *sync.Map, QueueName string) (*Queue, string) {
+func GetQueueByName(Queues *sync.Map, QueueName string) (*queue.Queue, string) {
 	// TODO: Refactor to use map instead of full scan
-	var FoundQueue *Queue
+	var FoundQueue *queue.Queue
 	var FoundQueueURL string
 	Queues.Range(func(QueueURL, v interface{}) bool {
-		var Queue = v.(*Queue)
+		var Queue = v.(*queue.Queue)
 		if Queue.QueueName == QueueName {
 			FoundQueue = Queue
 			FoundQueueURL = QueueURL.(string)
@@ -98,7 +30,7 @@ func GetQueueByName(Queues *sync.Map, QueueName string) (*Queue, string) {
 }
 
 // CreateQueue TODO: Add comment
-func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
+func CreateQueue(Queues *sync.Map, QueueName string) (*queue.Queue, string) {
 	var ExistingQueue, ExistingQueueURL = GetQueueByName(Queues, QueueName)
 	if ExistingQueue != nil {
 		return ExistingQueue, ExistingQueueURL
@@ -106,7 +38,7 @@ func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
 
 	// TODO: Move protocol/hostname prefix to app config
 	var QueueURL = fmt.Sprintf("http://localhost/%s", QueueName)
-	var Queue = Queue{
+	var Queue = queue.Queue{
 		QueueName: QueueName,
 		// TODO: Create good ARN
 		QueueArn:                              QueueName,
@@ -120,8 +52,8 @@ func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
 		MessageRetentionPeriod:                346500,
 		DelaySeconds:                          0,
 		ReceiveMessageWaitTimeSeconds:         30,
-		Messages2:                             make(map[string]*Message),
-		SendChannel:                           make(chan *Message),
+		Messages2:                             make(map[string]*queue.Message),
+		SendChannel:                           make(chan *queue.Message),
 		ReceiveChannel:                        make(chan events.ReceiveRequestEvent),
 		DeleteChannel:                         make(chan events.DeleteRequestEvent),
 	}
@@ -131,7 +63,7 @@ func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
 	return &Queue, QueueURL
 }
 
-func queueActor(Queue *Queue) {
+func queueActor(Queue *queue.Queue) {
 	for {
 		select {
 		case Message := <-Queue.SendChannel:
@@ -144,15 +76,15 @@ func queueActor(Queue *Queue) {
 	}
 }
 
-func sendMessage(Queue *Queue, Message *Message) {
+func sendMessage(Queue *queue.Queue, Message *queue.Message) {
 	// TODO: Check if there's a race condition with reading this field somewhere else
 	Queue.ApproximateNumberOfMessages++
 	Queue.Messages2[Message.MessageID] = Message
 }
 
-func receiveMessage(Queue *Queue, Event events.ReceiveRequestEvent) {
+func receiveMessage(Queue *queue.Queue, Event events.ReceiveRequestEvent) {
 	var Now = time.Now().Unix()
-	var FoundMessages = make([]interface{}, MaxBatchSize)
+	var FoundMessages = make([]interface{}, limits.MaxBatchSize)
 	var NumFoundMessages = 0
 	for _, Message := range Queue.Messages2 {
 		if Message.VisibilityDeadline < Now {
@@ -183,7 +115,7 @@ func receiveMessage(Queue *Queue, Event events.ReceiveRequestEvent) {
 	}
 }
 
-func deleteMessage(Queue *Queue, Event events.DeleteRequestEvent) {
+func deleteMessage(Queue *queue.Queue, Event events.DeleteRequestEvent) {
 	var MessagePtr, ok = Queue.ReceiptHandles.Load(Event.ReceiptHandle)
 	if !ok {
 		Event.ReturnChan <- events.DeleteResponseEvent{
@@ -192,7 +124,7 @@ func deleteMessage(Queue *Queue, Event events.DeleteRequestEvent) {
 		return
 	}
 
-	var Message = MessagePtr.(*Message)
+	var Message = MessagePtr.(*queue.Message)
 	Queue.ReceiptHandles.Delete(Event.ReceiptHandle)
 	delete(Queue.Messages2, Message.MessageID)
 	Queue.ApproximateNumberOfMessages--
