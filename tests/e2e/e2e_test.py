@@ -5,6 +5,7 @@ import sys
 import pytest
 import os
 import time
+import math
 
 port = os.environ.get("PORT", "8080")
 
@@ -21,14 +22,18 @@ sqs_client = session.client(
 )
 
 
+def create_queue_name_prefix():
+    return "end_to_end_test_{}_{}".format(round(time.time()), os.getpid())
+
+
 @pytest.fixture
 def create_random_queue():
     created_queues = []
 
     def _create_random_queue(queue_name="", cleanup=True):
         if queue_name == "":
-            queue_name = "end_to_end_test_{}_{}".format(
-                os.getpid(), str(len(created_queues))
+            queue_name = "{}_{}".format(
+                create_queue_name_prefix(), str(len(created_queues))
             )
         res = sqs_client.create_queue(QueueName=queue_name)
         queue_url = res["QueueUrl"]
@@ -37,6 +42,8 @@ def create_random_queue():
 
     yield _create_random_queue
 
+    print(created_queues)
+
     for queue in created_queues:
         if queue["Cleanup"]:
             sqs_client.delete_queue(QueueUrl=queue["QueueUrl"])
@@ -44,6 +51,32 @@ def create_random_queue():
 
 def test_create_queue(create_random_queue):
     create_random_queue()
+
+
+# Try to create queue twice and check that its created timestamp did not change
+# Need to sleep until next second
+# The assumption is that tests are run locally and both this script and tested app have
+# the same system time.
+# TODO: Make this test more robust by not assuming the above
+def test_create_queue_idempotency():
+    queue_name = "{}_idempotency".format(create_queue_name_prefix())
+    res = sqs_client.create_queue(QueueName=queue_name)
+    queue_url = res["QueueUrl"]
+
+    res = sqs_client.get_queue_attributes(QueueUrl=queue_url)
+    created_timestamp = res["Attributes"]["CreatedTimestamp"]
+    print(res["Attributes"]["CreatedTimestamp"])
+
+    # Sleep until the end of the seconds plus additional 10 ms
+    now = time.time()
+    time.sleep(math.ceil(now) - now + 0.01)
+
+    res = sqs_client.create_queue(QueueName=queue_name)
+    assert queue_url == res["QueueUrl"]
+
+    res = sqs_client.get_queue_attributes(QueueUrl=queue_url)
+    print(res["Attributes"]["CreatedTimestamp"])
+    assert created_timestamp == res["Attributes"]["CreatedTimestamp"]
 
 
 def test_create_queue_bad_name_1():
@@ -90,6 +123,7 @@ def test_get_queue_url(create_random_queue):
 
 def test_get_queue_attributes(create_random_queue):
     _, queue_url = create_random_queue()
+    # TODO: Actually check some of the returned values
     sqs_client.get_queue_attributes(QueueUrl=queue_url)
 
 

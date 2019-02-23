@@ -22,16 +22,15 @@ type batchValidationResult struct {
 // CreateQueue TODO: add comment
 func CreateQueue(Parameters url.Values, Queues *sync.Map) (string, int) {
 	var QueueName = Parameters.Get("QueueName")
+	// TODO: Move validation to a separate validator
 	var IsValidQueueName, err = regexp.MatchString("^[a-zA-Z0-9_\\-]{1,80}$", QueueName)
 	if !IsValidQueueName || err != nil {
 		return util.Error("InvalidParameterValue", "The specified queue name is not valid.")
 	}
-	var _, ok = Queues.Load(QueueName)
-	if !ok {
-		util.CreateQueue(Queues, QueueName)
-	}
-	var Result = fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueName)
-	return util.Success("CreateQueue", Result)
+
+	var _, QueueURL = util.CreateQueue(Queues, QueueName)
+	var CreateQueueResult = fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
+	return util.Success("CreateQueue", CreateQueueResult)
 }
 
 func validateBatch(Parameters url.Values, BatchPrefix string, RequiredKeys []string) batchValidationResult {
@@ -245,12 +244,13 @@ func GetQueueAttributes(Parameters url.Values, Queues *sync.Map) (string, int) {
 // GetQueueURL TODO: add comment
 func GetQueueURL(Parameters url.Values, Queues *sync.Map) (string, int) {
 	var QueueName = Parameters.Get("QueueName")
-	var _, ok = Queues.Load(QueueName)
-	if !ok {
+	// TODO: Validate QueueName
+	var Queue, QueueURL = util.GetQueueByName(Queues, QueueName)
+	if Queue == nil {
 		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
 
-	var GetQueueURLResult = fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueName)
+	var GetQueueURLResult = fmt.Sprintf("<QueueUrl>%s</QueueUrl>", QueueURL)
 	return util.Success("GetQueueUrl", GetQueueURLResult)
 }
 
@@ -400,8 +400,7 @@ func SendMessage(Parameters url.Values, Queues *sync.Map) (string, int) {
 	var QueueURL = Parameters.Get("QueueUrl")
 	var QueuePtr, ok = Queues.Load(QueueURL)
 	if !ok {
-		// TODO: Disable automatic queue creation on send
-		QueuePtr = util.CreateQueue(Queues, QueueURL)
+		return util.Error("AWS.SimpleQueueService.NonExistentQueue", "The specified queue does not exist for this wsdl version.")
 	}
 	var Queue = QueuePtr.(*util.Queue)
 

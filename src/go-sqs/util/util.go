@@ -10,6 +10,7 @@ import (
 
 // Queue TODO: add comment
 type Queue struct {
+	QueueName                             string
 	QueueArn                              string
 	ApproximateNumberOfMessages           int64
 	ApproximateNumberOfMessagesNotVisible int64
@@ -71,10 +72,34 @@ func Error(ErrorCode string, ErrorMessage string) (string, int) {
 </ErrorResponse>`, ErrorCode, ErrorMessage, RequestID), 400
 }
 
+// GetQueueByName TODO: Add comment
+func GetQueueByName(Queues *sync.Map, QueueName string) (*Queue, string) {
+	// TODO: Refactor to use map instead of full scan
+	var FoundQueue *Queue
+	var FoundQueueURL string
+	Queues.Range(func(QueueURL, v interface{}) bool {
+		var Queue = v.(*Queue)
+		if Queue.QueueName == QueueName {
+			FoundQueue = Queue
+			FoundQueueURL = QueueURL.(string)
+			return false
+		}
+		return true
+	})
+
+	return FoundQueue, FoundQueueURL
+}
+
 // CreateQueue TODO: Add comment
-func CreateQueue(Queues *sync.Map, QueueName string) *Queue {
-	// TODO: Create real URL for queue
-	Queues.Store(QueueName, &Queue{
+func CreateQueue(Queues *sync.Map, QueueName string) (*Queue, string) {
+	var ExistingQueue, ExistingQueueURL = GetQueueByName(Queues, QueueName)
+	if ExistingQueue != nil {
+		return ExistingQueue, ExistingQueueURL
+	}
+
+	var QueueURL = fmt.Sprintf("http://localhost/%s", QueueName)
+	var Queue = Queue{
+		QueueName: QueueName,
 		// TODO: Create good ARN
 		QueueArn:                              QueueName,
 		ApproximateNumberOfMessages:           0,
@@ -89,11 +114,11 @@ func CreateQueue(Queues *sync.Map, QueueName string) *Queue {
 		ReceiveMessageWaitTimeSeconds:         30,
 		Messages2:                             make(map[string]*Message),
 		SendChannel:                           make(chan *Message),
-	})
+	}
+	Queues.Store(QueueURL, &Queue)
 
-	var QueuePtr, _ = Queues.Load(QueueName)
-	go queueActor(QueuePtr.(*Queue))
-	return QueuePtr.(*Queue)
+	go queueActor(&Queue)
+	return &Queue, QueueURL
 }
 
 func queueActor(Queue *Queue) {
