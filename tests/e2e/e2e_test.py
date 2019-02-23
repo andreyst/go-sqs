@@ -53,6 +53,11 @@ def test_create_queue(create_random_queue):
     create_random_queue()
 
 
+def test_create_queue_without_queue_name():
+    # TODO: Try to create a queue without QueueName parameter
+    pass
+
+
 # Try to create queue twice and check that its created timestamp did not change
 # Need to sleep until next second
 # The assumption is that tests are run locally and both this script and tested app have
@@ -165,6 +170,18 @@ def test_receive_message(create_random_queue):
 
     message = res["Messages"][0]
     assert message["Body"] == MessageBody
+
+
+def test_empty_receive_message(create_random_queue):
+    _, queue_url = create_random_queue()
+    res = sqs_client.receive_message(QueueUrl=queue_url, WaitTimeSeconds=10)
+    assert "Messages" not in res
+
+
+def test_exactly_once_send_receive():
+    # TODO: Add a multiprocessing test to write and read 100k messages simultaneously and
+    # verify that everything that was sent was received exactly once
+    pass
 
 
 def test_receive_message_delay_seconds(create_random_queue):
